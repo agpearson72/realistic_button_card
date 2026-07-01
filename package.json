@@ -1,0 +1,16 @@
+{
+  "name": "realistic-button-card",
+  "version": "1.0.0",
+  "description": "Neumorphic button card templates for Home Assistant custom:button-card",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "js-yaml": "^5.2.0"
+  },
+  "private": true
+}
