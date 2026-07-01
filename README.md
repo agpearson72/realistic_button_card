@@ -28,25 +28,26 @@ Neumorphic, glow-reactive button card templates for [Home Assistant](https://www
    ```
    https://github.com/YOUR_USERNAME/realistic-button-card
    ```
-4. Set category to **Plugin**
+4. Set the type to **Dashboard**
 5. Click **Add**
-6. Find **Realistic Button Card Templates** in the HACS Frontend store and click **Download**
-7. **Restart Home Assistant** (or do a hard-refresh of the browser)
+6. Find **Realistic Button Card Templates** in the HACS store and click **Download**
+7. **Restart Home Assistant** (or hard-refresh the browser with Ctrl+Shift+R)
 
-The JS resource is automatically added to your Lovelace configuration. The templates register themselves into `custom:button-card` on page load — no `!include` or YAML changes needed.
+HACS downloads the JS file to `www/community/` and registers it as a Lovelace resource automatically. The templates inject themselves into `custom:button-card` on page load — no `!include` or YAML editing needed.
 
 ### Manual Installation
 
 1. Download `dist/realistic-button-card.js` from this repository
 2. Place it in `config/www/realistic-button-card/realistic-button-card.js`
 3. Add the resource in **Settings → Dashboards → ⋮ → Resources**:
-   - URL: `/local/realistic-button-card/realistic-button-card.js`
+   - URL: `/hacsfiles/realistic-button-card/realistic-button-card.js`  
+     (or `/local/realistic-button-card/realistic-button-card.js` if installed manually)
    - Type: **JavaScript Module**
 4. Restart Home Assistant
 
 ### How It Works
 
-The JS file auto-injects all five templates into `button_card_templates` when the Lovelace UI loads. You do **not** need to add `button_card_templates: !include ...` to your dashboard YAML — just use `template:` directly on any card.
+The JS file auto-injects all five `button_card_templates` into the Lovelace config when the UI loads. You do **not** need to add `button_card_templates: !include ...` to your dashboard YAML — just use `template:` directly on any card.
 
 > **Note:** If you also define templates with the same name in your dashboard YAML, the YAML version takes precedence (the JS will not overwrite existing templates).
 
@@ -141,7 +142,7 @@ name: Bedroom Fan
 | `weather_fallback_icon` | `mdi:weather-partly-cloudy` | Fallback icon |
 | `weather_use_daynight` | `true` | Switch icons for day/night based on `sun.sun` |
 | `weather_rain_enabled` | `false` | Force rain animation on |
-| `weather_rain_entity` | `''` | Entity that triggers rain animation when active/numeric > 0 |
+| `weather_rain_entity` | `''` | Entity that triggers rain when active/numeric > 0 |
 | `weather_rain_color` | `#4fc3f7` | Rain drop and puddle color |
 | `weather_puddle_height` | `6` | Puddle height (%) |
 | `weather_rain_drops` | `16` | Number of rain drops |
@@ -231,7 +232,7 @@ npm install      # first time only
 npm run build    # regenerates dist/realistic-button-card.js
 ```
 
-Commit both the YAML and the generated JS. The CI will verify they stay in sync.
+Commit both the YAML and the generated JS file. The CI will verify they stay in sync.
 
 ### Project Structure
 
@@ -240,7 +241,7 @@ Commit both the YAML and the generated JS. The CI will verify they stay in sync.
 │   ├── realistic_button_templates.yaml   ← source of truth
 │   └── realistic-button-card.js          ← generated (do not hand-edit)
 ├── build.js                              ← YAML → JS converter
-├── hacs.json                             ← HACS plugin manifest
+├── hacs.json                             ← HACS Dashboard manifest
 ├── info.md                               ← HACS store description
 └── package.json
 ```
