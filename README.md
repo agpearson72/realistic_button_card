@@ -20,7 +20,7 @@ Neumorphic, glow-reactive button card templates for [Home Assistant](https://www
 
 ## Installation
 
-### HACS (Recommended)
+### Step 1: Add the Repository to HACS
 
 1. Open HACS in your Home Assistant instance
 2. Click the **⋮** menu (top right) → **Custom repositories**
@@ -31,29 +31,46 @@ Neumorphic, glow-reactive button card templates for [Home Assistant](https://www
 4. Set the type to **Dashboard**
 5. Click **Add**
 6. Find **Realistic Button Card Templates** in the HACS store and click **Download**
-7. **Restart Home Assistant** (or hard-refresh the browser with Ctrl+Shift+R)
+7. **Restart Home Assistant**
 
-HACS downloads the JS file to `www/community/` and registers it as a Lovelace resource automatically. The templates inject themselves into `custom:button-card` on page load — no `!include` or YAML editing needed.
+### Step 2: Load the Templates
 
-### Manual Installation
+HACS downloads the files to `/hacsfiles/realistic-button-card/`. You have two options to load the templates:
 
-1. Download `dist/realistic-button-card.js` from this repository
-2. Place it in `config/www/realistic-button-card/realistic-button-card.js`
-3. Add the resource in **Settings → Dashboards → ⋮ → Resources**:
-   - URL: `/hacsfiles/realistic-button-card/realistic-button-card.js`  
-     (or `/local/realistic-button-card/realistic-button-card.js` if installed manually)
+#### Option A — Automatic via JS Resource (default)
+
+HACS automatically registers the JS file as a Lovelace resource. The JS intercepts `custom:button-card` and injects the templates on page load. **No additional configuration needed** — just start using `template: realistic_button` on your cards.
+
+Open the browser console (F12) to confirm you see the registration message.
+
+#### Option B — Native `button_card_templates_url` (most reliable)
+
+If Option A doesn't work on your setup, use button-card's built-in URL loading. Add this to the **top** of your dashboard's raw configuration:
+
+**For UI-managed dashboards:**
+
+1. Go to your dashboard → **⋮** → **Edit dashboard** → **⋮** → **Raw configuration editor**
+2. Add at the top:
+   ```yaml
+   button_card_templates_url:
+     - /hacsfiles/realistic-button-card/realistic_button_templates.yaml
+   ```
+
+**For YAML-mode dashboards:** add the same `button_card_templates_url` lines to the top of your dashboard YAML file.
+
+> **Note:** `button_card_templates_url` must be added to **each dashboard** where you want to use the templates.
+
+### Manual Installation (without HACS)
+
+1. Download the latest release from GitHub
+2. Copy the `dist/` contents to `config/www/realistic-button-card/`
+3. Add the JS resource in **Settings → Dashboards → ⋮ → Resources**:
+   - URL: `/local/realistic-button-card/realistic-button-card.js`
    - Type: **JavaScript Module**
-4. Restart Home Assistant
-
-### How It Works
-
-The JS file auto-injects all five `button_card_templates` into the Lovelace config when the UI loads. You do **not** need to add `button_card_templates: !include ...` to your dashboard YAML — just use `template:` directly on any card.
-
-> **Note:** If you also define templates with the same name in your dashboard YAML, the YAML version takes precedence (the JS will not overwrite existing templates).
+4. (Or use `button_card_templates_url` with `/local/realistic-button-card/realistic_button_templates.yaml`)
+5. Restart Home Assistant
 
 ## Quick Start
-
-### Basic Light Button
 
 ```yaml
 type: custom:button-card
@@ -232,13 +249,13 @@ npm install      # first time only
 npm run build    # regenerates dist/realistic-button-card.js
 ```
 
-Commit both the YAML and the generated JS file. The CI will verify they stay in sync.
+Commit both the YAML and the generated JS file.
 
 ### Project Structure
 
 ```
 ├── dist/
-│   ├── realistic_button_templates.yaml   ← source of truth
+│   ├── realistic_button_templates.yaml   ← source of truth (also served via URL)
 │   └── realistic-button-card.js          ← generated (do not hand-edit)
 ├── build.js                              ← YAML → JS converter
 ├── hacs.json                             ← HACS Dashboard manifest
@@ -248,14 +265,18 @@ Commit both the YAML and the generated JS file. The CI will verify they stay in 
 
 ## Troubleshooting
 
-**Templates not loading?**
-- Open browser DevTools → Console and look for the `realistic-button-card` registration message
-- Make sure `custom:button-card` is installed and working
-- Try a hard refresh (Ctrl+Shift+R / Cmd+Shift+R)
-- Check that the resource is listed in **Settings → Dashboards → Resources**
+**"Template not found" error?**
+
+1. Open browser DevTools (F12) → Console tab
+2. Look for `realistic-button-card` — if you see the green registration message, the JS injection worked
+3. If you don't see any message, the JS resource may not be loading — check **Settings → Dashboards → Resources**
+4. **Most reliable fix:** use `button_card_templates_url` (see Option B above) — this is button-card's native loading mechanism and always works
 
 **Templates in YAML override JS?**
-- By design. If you define `realistic_button` in your dashboard YAML, that version wins. Remove it from YAML to use the JS-injected version.
+By design. If you define `realistic_button` in your dashboard YAML, that version wins. Remove it from YAML to use the auto-injected version.
+
+**Works on one dashboard but not another?**
+If using `button_card_templates_url`, you need to add it to each dashboard separately. The JS auto-injection applies globally.
 
 ## License
 

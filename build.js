@@ -17,10 +17,12 @@ const OUT = path.join(__dirname, 'dist', 'realistic-button-card.js');
 // ---------- read & parse ----------
 const raw = fs.readFileSync(SRC, 'utf8');
 const doc = yaml.load(raw);
-const templates = doc.button_card_templates;
+
+// Support both formats: with or without the button_card_templates wrapper
+const templates = doc.button_card_templates || doc;
 
 if (!templates || typeof templates !== 'object') {
-  console.error('ERROR: No button_card_templates key found in YAML.');
+  console.error('ERROR: Could not parse templates from YAML.');
   process.exit(1);
 }
 
@@ -96,82 +98,147 @@ const output = `/**
   /* ── registration logic ────────────────────────────────────────── */
 
   /**
-   * Traverse the DOM shadow roots to reach the Lovelace object,
-   * then merge our templates into button_card_templates.
+   * Merge TEMPLATES into a config object (does not overwrite existing).
+   * Returns the number of templates injected.
    */
-  function getLovelace() {
-    // Modern HA (2024+) path
-    let root = document.querySelector('home-assistant');
-    if (!root || !root.shadowRoot) return null;
-
-    root = root.shadowRoot.querySelector('home-assistant-main');
-    if (!root || !root.shadowRoot) return null;
-
-    root = root.shadowRoot.querySelector('ha-panel-lovelace');
-    if (!root || !root.shadowRoot) return null;
-
-    root = root.shadowRoot.querySelector('hui-root');
-    if (!root) return null;
-
-    return root.lovelace || null;
-  }
-
-  function injectTemplates() {
-    const ll = getLovelace();
-    if (!ll || !ll.config) return false;
-
-    if (!ll.config.button_card_templates) {
-      ll.config.button_card_templates = {};
-    }
-
-    let injected = 0;
-    for (const [name, tpl] of Object.entries(TEMPLATES)) {
-      if (!ll.config.button_card_templates[name]) {
-        ll.config.button_card_templates[name] = tpl;
+  function mergeInto(config) {
+    if (!config || typeof config !== 'object') return 0;
+    if (!config.button_card_templates) config.button_card_templates = {};
+    var injected = 0;
+    for (var name in TEMPLATES) {
+      if (!TEMPLATES.hasOwnProperty(name)) continue;
+      if (!config.button_card_templates[name]) {
+        config.button_card_templates[name] = TEMPLATES[name];
         injected++;
       }
     }
+    return injected;
+  }
 
-    if (injected > 0) {
+  function logSuccess(count, strategy) {
+    if (count > 0) {
       console.info(
-        '%c ' + CARD_NAME + ' %c v' + CARD_VERSION + ' %c registered ' + injected + ' template(s) ',
+        '%c ' + CARD_NAME + ' %c v' + CARD_VERSION + ' %c ' + count + ' template(s) registered via ' + strategy + ' ',
         'background:#1e88e5;color:#fff;font-weight:bold;border-radius:3px 0 0 3px;padding:2px 4px',
         'background:#333;color:#fff;padding:2px 4px',
         'background:#43a047;color:#fff;font-weight:bold;border-radius:0 3px 3px 0;padding:2px 4px'
       );
     }
-    return true;
   }
 
-  // Retry until Lovelace is available (HA loads asynchronously)
-  let attempts = 0;
-  const MAX_ATTEMPTS = 50;    // ~10 seconds
-  const RETRY_MS = 200;
+  /* ─── Strategy 1: Monkey-patch button-card ─────────────────────
+   *  Intercepts every button-card instance's \`lovelace\` property
+   *  setter.  When HA passes the lovelace config to the card, we
+   *  merge our templates before the card renders.  This is the most
+   *  reliable approach because it works regardless of HA version or
+   *  shadow DOM structure.
+   */
+  var patchApplied = false;
 
-  function tryInject() {
-    if (injectTemplates()) return;
-    attempts++;
-    if (attempts < MAX_ATTEMPTS) {
-      setTimeout(tryInject, RETRY_MS);
-    } else {
-      console.warn(
-        CARD_NAME + ': could not find Lovelace config after ' + MAX_ATTEMPTS +
-        ' attempts.  Make sure custom:button-card is installed.'
-      );
+  function patchButtonCard() {
+    if (patchApplied) return;
+    var BtnCard = customElements.get('button-card');
+    if (!BtnCard) return;
+    patchApplied = true;
+
+    var proto = BtnCard.prototype;
+
+    // Find the existing property descriptor (LitElement reactive property or plain)
+    var desc = null;
+    var p = proto;
+    while (p && !desc) {
+      desc = Object.getOwnPropertyDescriptor(p, 'lovelace');
+      if (!desc) p = Object.getPrototypeOf(p);
     }
+
+    var privateName = '_lovelace';
+
+    Object.defineProperty(proto, 'lovelace', {
+      configurable: true,
+      enumerable: true,
+      set: function (value) {
+        // Inject templates into the config the card is about to use
+        if (value && value.config) {
+          var n = mergeInto(value.config);
+          logSuccess(n, 'button-card patch');
+        }
+        // Call original setter or fall back to storing on a private field
+        if (desc && desc.set) {
+          desc.set.call(this, value);
+        } else {
+          this[privateName] = value;
+        }
+      },
+      get: function () {
+        if (desc && desc.get) return desc.get.call(this);
+        return this[privateName];
+      }
+    });
+
+    console.info(CARD_NAME + ': button-card patched — templates will auto-inject');
   }
 
-  // Start injection when the window is ready
+  // Wait for button-card to register, then patch it
+  customElements.whenDefined('button-card').then(patchButtonCard);
+
+  /* ─── Strategy 2: DOM traversal fallback ───────────────────────
+   *  In case the monkey-patch misses (e.g. cards already rendered
+   *  before our script loaded), also try to inject into the
+   *  lovelace config via the DOM.  Tries multiple shadow DOM paths
+   *  for compatibility across HA versions.
+   */
+  function getLovelaceConfig() {
+    try {
+      var ha = document.querySelector('home-assistant');
+      if (!ha || !ha.shadowRoot) return null;
+      var main = ha.shadowRoot.querySelector('home-assistant-main');
+      if (!main || !main.shadowRoot) return null;
+
+      // Try multiple panel paths for HA version compat
+      var selectors = [
+        'ha-panel-lovelace',        // standard
+        'partial-panel-resolver',   // older HA
+      ];
+      for (var i = 0; i < selectors.length; i++) {
+        var panel = main.shadowRoot.querySelector(selectors[i]);
+        if (!panel) continue;
+        var root = panel.shadowRoot
+          ? panel.shadowRoot.querySelector('hui-root')
+          : null;
+        if (root && root.lovelace && root.lovelace.config) {
+          return root.lovelace.config;
+        }
+        // Also check for lovelace directly on the panel
+        if (panel.lovelace && panel.lovelace.config) {
+          return panel.lovelace.config;
+        }
+      }
+    } catch (e) { /* swallow */ }
+    return null;
+  }
+
+  var domAttempts = 0;
+  function tryDomInject() {
+    var config = getLovelaceConfig();
+    if (config) {
+      var n = mergeInto(config);
+      logSuccess(n, 'DOM injection');
+      return;
+    }
+    domAttempts++;
+    if (domAttempts < 60) setTimeout(tryDomInject, 250);
+  }
+
   if (document.readyState === 'complete') {
-    tryInject();
+    setTimeout(tryDomInject, 100);
   } else {
-    window.addEventListener('load', tryInject);
+    window.addEventListener('load', function () { setTimeout(tryDomInject, 100); });
   }
 
-  // Also listen for Lovelace rebuilds (dashboard switches, YAML reloads)
-  window.addEventListener('lovelace-updated', function () {
-    attempts = 0;
-    tryInject();
+  /* ─── Strategy 3: Re-inject on dashboard navigation ────────── */
+  window.addEventListener('location-changed', function () {
+    domAttempts = 0;
+    setTimeout(tryDomInject, 300);
   });
 
   /* ── HACS / card-picker registration ───────────────────────────── */
