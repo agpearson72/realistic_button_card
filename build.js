@@ -126,70 +126,34 @@ const output = `/**
     }
   }
 
-  /* ─── Strategy 1: Monkey-patch button-card ─────────────────────
-   *  Intercepts every button-card instance's \`lovelace\` property
-   *  setter.  When HA passes the lovelace config to the card, we
-   *  merge our templates before the card renders.  This is the most
-   *  reliable approach because it works regardless of HA version or
-   *  shadow DOM structure.
+  /* ─── DOM traversal helper ──────────────────────────────────────
+   *  button-card resolves \`template:\` by calling an internal
+   *  getLovelace()/getLovelaceCast() helper *synchronously inside
+   *  setConfig()*, reading ll.config.button_card_templates[name] and
+   *  throwing immediately if it's missing. There is no \`lovelace\`
+   *  property on the card instance to patch — it's a local lookup,
+   *  not a settable field. This walks the same shadow-DOM chain HA
+   *  uses to find the live lovelace config object, with a recursive
+   *  fallback in case the panel structure shifts between HA versions.
    */
-  var patchApplied = false;
-
-  function patchButtonCard() {
-    if (patchApplied) return;
-    var BtnCard = customElements.get('button-card');
-    if (!BtnCard) return;
-    patchApplied = true;
-
-    var proto = BtnCard.prototype;
-
-    // Find the existing property descriptor (LitElement reactive property or plain)
-    var desc = null;
-    var p = proto;
-    while (p && !desc) {
-      desc = Object.getOwnPropertyDescriptor(p, 'lovelace');
-      if (!desc) p = Object.getPrototypeOf(p);
-    }
-
-    var privateName = '_lovelace';
-
-    Object.defineProperty(proto, 'lovelace', {
-      configurable: true,
-      enumerable: true,
-      set: function (value) {
-        // Inject templates into the config the card is about to use
-        if (value && value.config) {
-          var n = mergeInto(value.config);
-          logSuccess(n, 'button-card patch');
-        }
-        // Call original setter or fall back to storing on a private field
-        if (desc && desc.set) {
-          desc.set.call(this, value);
-        } else {
-          this[privateName] = value;
-        }
-      },
-      get: function () {
-        if (desc && desc.get) return desc.get.call(this);
-        return this[privateName];
+  function deepFind(selector, root) {
+    root = root || document;
+    var found = root.querySelector ? root.querySelector(selector) : null;
+    if (found) return found;
+    var all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].shadowRoot) {
+        var res = deepFind(selector, all[i].shadowRoot);
+        if (res) return res;
       }
-    });
-
-    console.info(CARD_NAME + ': button-card patched — templates will auto-inject');
+    }
+    return null;
   }
 
-  // Wait for button-card to register, then patch it
-  customElements.whenDefined('button-card').then(patchButtonCard);
-
-  /* ─── Strategy 2: DOM traversal fallback ───────────────────────
-   *  In case the monkey-patch misses (e.g. cards already rendered
-   *  before our script loaded), also try to inject into the
-   *  lovelace config via the DOM.  Tries multiple shadow DOM paths
-   *  for compatibility across HA versions.
-   */
   function getLovelaceConfig() {
     try {
       var ha = document.querySelector('home-assistant');
+      if (ha && ha.lovelace && ha.lovelace.config) return ha.lovelace.config;
       if (!ha || !ha.shadowRoot) return null;
       var main = ha.shadowRoot.querySelector('home-assistant-main');
       if (!main || !main.shadowRoot) return null;
@@ -213,9 +177,57 @@ const output = `/**
           return panel.lovelace.config;
         }
       }
+
+      // Recursive fallback in case the chain above no longer matches
+      var huiRoot = deepFind('hui-root', main.shadowRoot);
+      if (huiRoot && huiRoot.lovelace && huiRoot.lovelace.config) {
+        return huiRoot.lovelace.config;
+      }
     } catch (e) { /* swallow */ }
     return null;
   }
+
+  /* ─── Strategy 1: Monkey-patch button-card's setConfig ─────────
+   *  This is the actual moment button-card looks up templates, so
+   *  we hook it directly and merge our templates into the live
+   *  lovelace config object synchronously, *before* calling through
+   *  to the original setConfig. This is the most reliable approach
+   *  because it runs exactly when (and every time) button-card needs
+   *  the templates, rather than racing it on a timer.
+   */
+  var patchApplied = false;
+
+  function patchButtonCard() {
+    if (patchApplied) return;
+    var BtnCard = customElements.get('button-card');
+    if (!BtnCard) return;
+    patchApplied = true;
+
+    var proto = BtnCard.prototype;
+    var origSetConfig = proto.setConfig;
+
+    proto.setConfig = function (config) {
+      try {
+        var llConfig = getLovelaceConfig();
+        if (llConfig) {
+          var n = mergeInto(llConfig);
+          logSuccess(n, 'setConfig patch');
+        }
+      } catch (e) { /* swallow */ }
+      return origSetConfig.call(this, config);
+    };
+
+    console.info(CARD_NAME + ': button-card patched — templates will auto-inject');
+  }
+
+  // Wait for button-card to register, then patch it
+  customElements.whenDefined('button-card').then(patchButtonCard);
+
+  /* ─── Strategy 2: DOM traversal fallback ───────────────────────
+   *  Safety net for edge cases where a button-card instance's
+   *  setConfig runs before our script has patched the prototype
+   *  (e.g. it was already registered and configured pre-navigation).
+   */
 
   var domAttempts = 0;
   function tryDomInject() {
