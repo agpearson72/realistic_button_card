@@ -26,7 +26,7 @@ Neumorphic, glow-reactive button card templates for [Home Assistant](https://www
 2. Click the **⋮** menu (top right) → **Custom repositories**
 3. Add this repository URL:
    ```
-   https://github.com/YOUR_USERNAME/realistic-button-card
+   https://github.com/agpearson72/realistic-button-card
    ```
 4. Set the type to **Dashboard**
 5. Click **Add**
